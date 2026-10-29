@@ -28,7 +28,7 @@ def export_frames(screen, intro, folder):
 
 def main():
     parser = argparse.ArgumentParser(prog="python -m skull_intro",
-                                     description="Intro animada de Skull With Gas Mask Co.")
+                                     description="Intro animada de Skull with Gas Mask Studio")
     parser.add_argument("--duration", type=float, default=FULL_DURATION,
                         help=f"duración en segundos (por defecto {FULL_DURATION:g})")
     parser.add_argument("--quick", action="store_true",
@@ -43,7 +43,7 @@ def main():
     if args.export:
         os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     pygame.init()
-    pygame.display.set_caption("Skull With Gas Mask Co.")
+    pygame.display.set_caption("Skull with Gas Mask Studio")
     if args.fullscreen and not args.export:
         screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         pygame.mouse.set_visible(False)

@@ -1,4 +1,4 @@
-"""Intro animada del logo de Skull With Gas Mask Co."""
+"""Intro animada del logo de Skull with Gas Mask Studio"""
 
 from .intro import (
     FULL_DURATION, QUICK_DURATION, QUICK_THRESHOLD, SkullIntro, Timeline, intro_for_launch,

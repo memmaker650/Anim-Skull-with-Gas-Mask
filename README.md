@@ -1,14 +1,16 @@
 # Skull with Gas Mask
 
-Animación de entrada (intro) del logo de **Skull With Gas Mask Co.**, hecha en Python con [pygame-ce](https://pyga.me/).
-Todo se dibuja por código (no hacen falta imágenes).
+Animación de entrada (intro) del logo de **Skull with Gas Mask Studio**, hecha en Python con [pygame-ce](https://pyga.me/).
+Las imágenes están en `skull_intro/resources/`: la calavera es `calavera_SKwGM.png` (se le quita
+el fondo gris y el texto al cargarla) y la máscara que cae encima es `GasMask.png`. Su colocación
+se ajusta en `skull_intro/art.py`.
 
-**Versión larga** (por defecto 13 s, pensada para la primera apertura):
-fondo negro con un punto blanco → el punto crece hasta revelar una calavera → cae la máscara de gas →
-el gas verde llena la pantalla (75 % de opacidad) → aparece «Skull With Gas Mask Co.».
+**Versión larga** (por defecto 9 s, pensada para la primera apertura): la calavera aparece en
+primer plano sobre fondo negro → cae la máscara de gas → nubes de gas verde suben y llenan la
+pantalla (75 % de opacidad) → aparece «Skull with Gas Mask Studio».
 
-**Versión corta** (por defecto 3 s, para las aperturas siguientes): la calavera aparece ya a tamaño final,
-cae la máscara, el gas entra de golpe y aparece el nombre.
+**Versión corta** (por defecto 3 s, para las aperturas siguientes): lo mismo, pero la máscara cae
+enseguida y el gas entra de golpe.
 
 ## Instalación
 
@@ -35,7 +37,7 @@ Las duraciones por debajo de 6 s usan automáticamente el guion corto; se puede 
 from skull_intro import SkullIntro, intro_for_launch
 
 # Bloqueante: larga la primera vez que se abre la app, corta las siguientes
-intro_for_launch("mi_app", first=13, later=3).play(screen)
+intro_for_launch("mi_app", first=9, later=3).play(screen)
 
 # O dentro de tu propio bucle / animación
 intro = SkullIntro(duration=3)
@@ -43,7 +45,7 @@ while intro.update(dt):          # dt en segundos
     intro.draw(screen)           # o intro.draw(una_subsuperficie)
 ```
 
-- `SkullIntro(duration, mode="auto", text="Skull With Gas Mask Co.")`
+- `SkullIntro(duration, mode="auto", text="Skull with Gas Mask Studio")`
 - `render(surface, t)` dibuja el instante `t` de forma determinista (sirve para sincronizarla con otras animaciones).
 - `skip()` salta al final; `finished` indica si ha terminado.
 - `is_first_launch(app_name)` devuelve `True` solo la primera vez (guarda un marcador en `~/.<app_name>/`).

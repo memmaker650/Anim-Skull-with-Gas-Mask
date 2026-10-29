@@ -8,29 +8,27 @@ from pathlib import Path
 
 import pygame
 
-from .drawing import BASE_H, BASE_W, clamp01, ease_in_cubic, ease_out_cubic, lerp, smoothstep
-from .gas_mask import draw_gas_mask
-from .skull import draw_skull
+from .art import load_mask, load_skull
+from .drawing import BASE_H, clamp01, ease_in_cubic, ease_out_cubic, lerp, smoothstep
 
 FPS = 60
-DEFAULT_TEXT = "Skull With Gas Mask Co."
-FULL_DURATION = 13.0
+DEFAULT_TEXT = "Skull with Gas Mask Studio"
+FULL_DURATION = 9.0
 QUICK_DURATION = 3.0
 QUICK_THRESHOLD = 6.0  # por debajo de esta duración se usa el guion corto
 
 GAS_MAX_ALPHA = round(255 * 0.75)  # opacidad final del gas: 75 %
-GAS_COLOR = (52, 160, 38)
-GAS_LIGHT = (100, 210, 66)
+GAS_DARK = (34, 120, 28)    # fondo de la masa de gas
+GAS_LIGHT = (110, 214, 70)  # centro iluminado de cada nube
 
-# Momentos de cada fase como fracción de la duración total.
+# Momentos de cada fase como fracción de la duración total. En ambos guiones la calavera
+# aparece ya en primer plano; el largo se recrea más en cada fase.
 FULL_SCRIPT = dict(
-    dot_in=0.06, skull_in=(0.077, 0.115), zoom=(0.077, 0.354), mask=(0.385, 0.442),
-    shake_end=0.473, gas=(0.492, 0.738), text=(0.708, 0.838),
+    skull_in=(0.0, 0.14), mask=(0.24, 0.31), shake_end=0.36, gas=(0.38, 0.68), text=(0.64, 0.82),
 )
-# Guion corto: la calavera ya está a tamaño final, la máscara cae y el gas entra de golpe.
+# Guion corto: la máscara cae enseguida y el gas entra de golpe.
 QUICK_SCRIPT = dict(
-    dot_in=0.0, skull_in=(0.0, 0.08), zoom=(0.0, 0.0), mask=(0.08, 0.28),
-    shake_end=0.38, gas=(0.32, 0.46), text=(0.42, 0.62),
+    skull_in=(0.0, 0.08), mask=(0.08, 0.28), shake_end=0.38, gas=(0.32, 0.46), text=(0.42, 0.62),
 )
 
 
@@ -45,9 +43,7 @@ def progress(t, span):
 class Timeline:
     duration: float
     quick: bool
-    dot_in: float
     skull_in: tuple
-    zoom: tuple
     mask: tuple
     shake_end: float
     gas: tuple
@@ -66,32 +62,48 @@ class Timeline:
 
 @functools.cache
 def artwork():
-    """Calavera y máscara (se dibujan una sola vez por proceso)."""
-    skull, skull_shape = draw_skull()
-    return skull, draw_gas_mask(skull_shape)
+    """Calavera y máscara (se cargan una sola vez por proceso)."""
+    return load_skull(), load_mask()
 
 
-def make_puff_sprite(size=64):
-    """Mancha radial: RGB de GAS_COLOR (borde) a GAS_LIGHT (centro) y alfa hasta GAS_MAX_ALPHA."""
+def make_puff_sprite(size=96):
+    """Bola de nube: núcleo opaco (hasta GAS_MAX_ALPHA) con borde suave, iluminada desde
+    arriba (GAS_LIGHT en la parte alta, GAS_DARK abajo y en el borde)."""
     sprite = pygame.Surface((size, size), pygame.SRCALPHA)
     c = (size - 1) / 2
     for y in range(size):
         for x in range(size):
             d = clamp01(math.hypot(x - c, y - c) / c)
-            k = (1 - d) ** 2
-            rgb = [round(lerp(GAS_COLOR[i], GAS_LIGHT[i], k)) for i in range(3)]
-            sprite.set_at((x, y), (*rgb, round(GAS_MAX_ALPHA * smoothstep(1 - d))))
+            top = clamp01(0.5 - (y - c) / c * 0.6)        # 1 arriba, 0 abajo
+            k = (1 - d) ** 0.8 * top
+            rgb = [round(lerp(GAS_DARK[i], GAS_LIGHT[i], k)) for i in range(3)]
+            sprite.set_at((x, y), (*rgb, round(GAS_MAX_ALPHA * smoothstep(clamp01((1 - d) / 0.45)))))
     return sprite
 
 
-class Puff:
-    def __init__(self, rng, timeline):
-        self.x = rng.uniform(-0.1, 1.1)
-        self.t0 = rng.uniform(timeline.gas[0] - 0.5, timeline.duration + 1.0)
-        self.speed = rng.uniform(0.10, 0.22)   # alturas de pantalla por segundo
-        self.radius = rng.uniform(0.12, 0.30)  # relativo a la altura de pantalla
-        self.phase = rng.uniform(0, math.tau)
-        self.life = rng.uniform(2.5, 4.5)
+class Cloud:
+    """Nube del frente de gas. Las de la base cabecean sobre el frente y tapan su borde;
+    las demás nacen en él, suben, crecen y se disuelven en bucle."""
+
+    def __init__(self, rng, x, base):
+        self.x = x                                # fracción del ancho
+        self.base = base
+        self.radius = rng.uniform(0.16, 0.26) if base else rng.uniform(0.10, 0.20)  # × alto
+        self.period = rng.uniform(1.8, 3.2)       # segundos por ciclo de subida
+        self.phase = rng.random()
+        self.rise = rng.uniform(0.20, 0.38)       # altura que sube en un ciclo (× alto)
+        self.sway = rng.uniform(0, math.tau)
+
+
+class Wisp:
+    """Voluta más clara dentro de la masa de gas: le da textura mientras sube."""
+
+    def __init__(self, rng):
+        self.x = rng.uniform(-0.05, 1.05)
+        self.phase = rng.random()
+        self.speed = rng.uniform(0.05, 0.12)      # alturas por segundo
+        self.radius = rng.uniform(0.16, 0.30)
+        self.sway = rng.uniform(0, math.tau)
 
 
 class SkullIntro:
@@ -106,7 +118,7 @@ class SkullIntro:
     O de forma bloqueante con `intro.play(screen)`.
 
     `duration` son los segundos totales. Con `mode="auto"` las duraciones por debajo
-    de QUICK_THRESHOLD usan el guion corto (sin punto ni zoom); `mode` puede forzarse
+    de QUICK_THRESHOLD usan el guion corto; `mode` puede forzarse
     a "full" o "quick". Se adapta al tamaño de la superficie en la que se dibuja.
     """
 
@@ -116,8 +128,15 @@ class SkullIntro:
         self.elapsed = 0.0
         self.skull, self.mask = artwork()
         self.puff_sprite = make_puff_sprite()
+        self.gas_fade = pygame.Surface((1, 64), pygame.SRCALPHA)
+        for y in range(64):
+            self.gas_fade.set_at((0, y), (*GAS_DARK, round(GAS_MAX_ALPHA * smoothstep(y / 63))))
         rng = random.Random(seed)
-        self.puffs = [Puff(rng, self.timeline) for _ in range(70)]
+        n = 16
+        self.clouds = ([Cloud(rng, (i + rng.uniform(0.2, 0.8)) / n * 1.2 - 0.1, True) for i in range(n)]
+                       + [Cloud(rng, rng.uniform(-0.1, 1.1), False) for _ in range(34)])
+        self.wisps = [Wisp(rng) for _ in range(26)]
+        self._sprites = {}
         self._size = None
         self._scaled = {}
 
@@ -176,7 +195,7 @@ class SkullIntro:
         self._scaled.clear()
 
     def _scaled_art(self, name, surf, scale):
-        size = (max(1, round(BASE_W * scale)), max(1, round(BASE_H * scale)))
+        size = (max(1, round(surf.get_width() * scale)), max(1, round(surf.get_height() * scale)))
         key = (name, size)
         if key not in self._scaled:
             if len(self._scaled) > 8:
@@ -197,20 +216,9 @@ class SkullIntro:
         screen.fill((0, 0, 0))
         unit = self.unit
 
-        # 1. punto blanco (solo en el guion largo)
-        if tl.dot_in > 0:
-            dot_alpha = clamp01(t / tl.dot_in) * (1 - progress(t, tl.skull_in))
-            if dot_alpha > 0:
-                pulse = 1 + 0.25 * math.sin(t * 7)
-                dot = pygame.Surface((40, 40), pygame.SRCALPHA)
-                pygame.draw.circle(dot, (255, 255, 255, round(255 * dot_alpha)), (20, 20), 4 * unit * pulse)
-                screen.blit(dot, dot.get_rect(center=(self.w // 2, self.h // 2)))
-
-        # 2. zoom de la calavera (interpolación logarítmica: sensación de acercamiento)
-        p = smoothstep(progress(t, tl.zoom))
-        start_scale = 8 * unit / BASE_H
-        scale = math.exp(lerp(math.log(start_scale), math.log(self.final_scale), p))
-        center = [lerp(self.w / 2, self.anchor[0], p), lerp(self.h / 2, self.anchor[1], p)]
+        # 1. la calavera aparece ya en primer plano, a su tamaño final
+        scale = self.final_scale
+        center = list(self.anchor)
 
         # temblor al impactar la máscara
         shake = progress(t, (tl.mask[1], tl.shake_end))
@@ -223,7 +231,7 @@ class SkullIntro:
         if skull_alpha > 0:
             self._blit_centered(screen, self._scaled_art("skull", self.skull, scale), center, skull_alpha)
 
-        # 3. la máscara cae desde delante de la cámara y se ajusta a la cara
+        # 2. la máscara cae desde delante de la cámara y se ajusta a la cara
         m = progress(t, tl.mask)
         if m > 0:
             mask_scale = scale * lerp(2.8, 1.0, ease_in_cubic(m))
@@ -235,9 +243,20 @@ class SkullIntro:
             overlay.fill((255, 255, 255, round(70 * (1 - flash))))
             screen.blit(overlay, (0, 0))
 
-        # 4. gas venenoso y 5. texto
+        # 3. gas venenoso y 4. texto
         self._render_gas(screen, t)
         self._render_text(screen, t)
+
+    def _puff(self, size, alpha=1.0):
+        """Sprite de nube a `size` px (cacheado) con su opacidad multiplicada por `alpha`."""
+        size = max(2, int(size) // 2 * 2)
+        if size not in self._sprites:
+            self._sprites[size] = pygame.transform.smoothscale(self.puff_sprite, (size, size))
+        sprite = self._sprites[size]
+        if alpha < 1:
+            sprite = sprite.copy()
+            sprite.fill((255, 255, 255, round(255 * alpha)), special_flags=pygame.BLEND_RGBA_MULT)
+        return sprite
 
     def _render_gas(self, screen, t):
         g = progress(t, self.timeline.gas)
@@ -245,29 +264,42 @@ class SkullIntro:
             return
         layer = self.gas_layer
         gw, gh = layer.get_size()
-        layer.fill((0, 0, 0, 0))
+        layer.fill((*GAS_DARK, 0))
+        # Todo se mezcla con MAX: el alfa nunca pasa del 75 % y las nubes solo aclaran el color.
+        blend = pygame.BLEND_RGBA_MAX
 
-        # frente de gas que sube con borde ondulado
-        front = lerp(gh * 1.15, -gh * 0.3, smoothstep(g))
-        amp = gh * 0.045
-        edge = [(0, gh)]
-        for x in range(0, gw + 6, 6):
-            edge.append((x, front + amp * (math.sin(x * 0.05 + t * 1.7) + 0.6 * math.sin(x * 0.11 - t * 2.3))))
-        edge.append((gw, gh))
-        pygame.draw.polygon(layer, (*GAS_COLOR, GAS_MAX_ALPHA), edge)
+        def put(sprite, x, y):
+            layer.blit(sprite, sprite.get_rect(center=(round(x), round(y))), special_flags=blend)
 
-        # volutas que suben con el gas; la mezcla MAX garantiza que el alfa nunca supera el 75 %
-        for puff in self.puffs:
-            age = t - puff.t0
-            if not 0 < age < puff.life:
+        # masa de gas: sube desde abajo hasta cubrir la pantalla
+        front = lerp(gh * 1.35, -gh * 0.6, smoothstep(g))
+        fade_h = max(1, round(gh * 0.22))  # el borde superior se funde bajo las nubes de la base
+        top = round(front)
+        if top < gh:
+            if top + fade_h > 0:
+                put(pygame.transform.smoothscale(self.gas_fade, (gw, fade_h)), gw / 2, top + fade_h / 2)
+            if top + fade_h < gh:
+                layer.fill((*GAS_DARK, GAS_MAX_ALPHA), (0, max(0, top + fade_h), gw, gh))
+
+        # volutas claras dentro de la masa, subiendo despacio
+        for w in self.wisps:
+            y = gh * (1.2 - ((t * w.speed + w.phase) % 1.0) * 1.6)
+            r = w.radius * gh
+            inside = clamp01((y - front) / r)          # se apagan al llegar al frente
+            if inside > 0:
+                put(self._puff(r * 2, 0.45 * inside), w.x * gw + math.sin(t * 0.7 + w.sway) * gh * 0.04, y)
+
+        # frente de nubes: bocanadas que suben, crecen y se disuelven
+        for c in self.clouds:
+            sway = math.sin(t * 0.9 + c.sway) * gh * 0.03
+            if c.base:
+                r = c.radius * gh * (1 + 0.12 * math.sin(t * 1.3 + c.sway))
+                put(self._puff(r * 2), c.x * gw + sway, front + gh * 0.02 + math.cos(t * 1.1 + c.sway) * gh * 0.02)
                 continue
-            fade = math.sin(math.pi * age / puff.life)
-            size = max(2, round(puff.radius * gh * 2 * (0.7 + 0.5 * age / puff.life)))
-            y = max(front, 0) + gh * 0.2 - age * puff.speed * gh
-            x = puff.x * gw + math.sin(puff.phase + age * 1.3) * gh * 0.05
-            sprite = pygame.transform.smoothscale(self.puff_sprite, (size, size))
-            sprite.fill((255, 255, 255, round(255 * fade)), special_flags=pygame.BLEND_RGBA_MULT)
-            layer.blit(sprite, sprite.get_rect(center=(round(x), round(y))), special_flags=pygame.BLEND_RGBA_MAX)
+            age = (t / c.period + c.phase) % 1.0
+            r = c.radius * gh * (0.6 + 0.7 * age)
+            y = front - age * c.rise * gh
+            put(self._puff(r * 2, min(1.0, 3 * age) * (1 - age) ** 1.5), c.x * gw + sway * (1 + age), y)
 
         screen.blit(pygame.transform.smoothscale(layer, (self.w, self.h)), (0, 0))
 
@@ -277,7 +309,7 @@ class SkullIntro:
             return
         e = ease_out_cubic(p)
         unit = self.unit
-        spacing = lerp(34, 4, e) * unit
+        spacing = lerp(22, 3, e) * unit
         width = sum(g.get_width() for g, _ in self.glyphs) + spacing * (len(self.glyphs) - 1)
         text = pygame.Surface((math.ceil(width) + 12, self.font.get_height() + 12), pygame.SRCALPHA)
         shadow = text.copy()
